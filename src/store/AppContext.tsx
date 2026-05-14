@@ -64,7 +64,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
       fetchData();
 
-      globalChannel = supabase.channel('public-db')
+      globalChannel = supabase.channel(`public-db-${Math.random()}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchData())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'submissions' }, () => fetchData())
