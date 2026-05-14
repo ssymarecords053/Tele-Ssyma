@@ -1,6 +1,0 @@
-{
-  "firestore": {
-    "database": "ai-studio-telegramcalendar-893a3c76-20bd-4b01-8e54-01f95a22a4f3",
-    "rules": "firestore.rules"
-  }
-}
