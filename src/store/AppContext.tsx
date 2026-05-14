@@ -1,7 +1,46 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import WebApp from "@twa-dev/sdk";
 import { Task, Submission, User, Activity, ActivityType, Reminder, UserRole } from "../types";
-import { supabase, isSupabaseConfigured } from "../lib/supabase";
+import { db, auth } from "../lib/firebase";
+import { collection, doc, setDoc, updateDoc, deleteDoc, query, orderBy, onSnapshot, getDoc, where } from "firebase/firestore";
+import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid || null,
+      email: auth.currentUser?.email || null,
+      emailVerified: auth.currentUser?.emailVerified || null,
+      isAnonymous: auth.currentUser?.isAnonymous || null,
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // In production, you might report this to a dashboard instead of crashing
+}
 
 interface AppContextType {
   tasks: Task[];
@@ -33,70 +72,65 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // Authenticate & Fetch initial data
   useEffect(() => {
-    if (!isSupabaseConfigured) {
-      setIsLoading(false);
-      return;
-    }
+    let unsubTasks: () => void;
+    let unsubUsers: () => void;
+    let unsubSubs: () => void;
+    let unsubActs: () => void;
+    let unsubRems: () => void;
 
-    let globalChannel: any;
+    const setupListeners = (uid: string) => {
+      try {
+        const qTasks = query(collection(db, 'tasks'), orderBy('createdAt', 'desc'));
+        unsubTasks = onSnapshot(qTasks, (snapshot) => {
+          setTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task)));
+        }, (error) => handleFirestoreError(error, OperationType.GET, 'tasks'));
 
-    const setupListeners = () => {
-      const fetchData = async () => {
-        try {
-          const [tasksRes, usersRes, subsRes, actsRes, remsRes] = await Promise.all([
-            supabase.from('tasks').select('*').order('date', { ascending: false }),
-            supabase.from('users').select('*'),
-            supabase.from('submissions').select('*').order('submittedAt', { ascending: false }),
-            supabase.from('activities').select('*').order('timestamp', { ascending: false }),
-            supabase.from('reminders').select('*')
-          ]);
-          if (tasksRes.data) setTasks(tasksRes.data);
-          if (usersRes.data) setUsers(usersRes.data);
-          if (subsRes.data) setSubmissions(subsRes.data);
-          if (actsRes.data) setActivities(actsRes.data);
-          if (remsRes.data) setReminders(remsRes.data);
-        } catch (error) {
-          console.error("Error fetching data:", error);
-        } finally {
-          setIsLoading(false);
-        }
-      };
+        unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+          setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
+        }, (error) => handleFirestoreError(error, OperationType.GET, 'users'));
 
-      fetchData();
+        const qSubs = query(collection(db, 'submissions'), orderBy('submittedAt', 'desc'));
+        unsubSubs = onSnapshot(qSubs, (snapshot) => {
+          setSubmissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Submission)));
+        }, (error) => handleFirestoreError(error, OperationType.GET, 'submissions'));
 
-      globalChannel = supabase.channel(`public-db-${Math.random()}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchData())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'submissions' }, () => fetchData())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'activities' }, () => fetchData())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'reminders' }, () => fetchData())
-        .subscribe();
+        const qActs = query(collection(db, 'activities'), orderBy('timestamp', 'desc'));
+        unsubActs = onSnapshot(qActs, (snapshot) => {
+          setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Activity)));
+        }, (error) => handleFirestoreError(error, OperationType.GET, 'activities'));
+
+        unsubRems = onSnapshot(query(collection(db, 'reminders'), where('userId', '==', uid)), (snapshot) => {
+          setReminders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reminder)));
+        }, (error) => handleFirestoreError(error, OperationType.GET, 'reminders'));
+      } catch (error) {
+        console.error("Error setting up listeners:", error);
+      } finally {
+        setIsLoading(false);
+      }
     };
 
-    const initAuth = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          await supabase.auth.signInAnonymously();
-        }
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const uid = user.uid;
+        setupListeners(uid);
         
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const uid = user.id;
-          setupListeners();
-          
-          // Sync Telegram user
-          const tgUser = WebApp.initDataUnsafe?.user;
+        // Sync Telegram user to Firebase
+        const tgUser = WebApp.initDataUnsafe?.user;
+        
+        try {
+          // @ts-ignore
           const adminId = import.meta.env.VITE_ADMIN_TELEGRAM_ID;
           const isUserAdmin = adminId && tgUser && tgUser.id.toString() === adminId;
           
-          const { data: userSnap } = await supabase.from('users').select('*').eq('id', uid).single();
-          
-          if (userSnap) {
-            const existingUser = userSnap as User;
+          const userRef = doc(db, 'users', uid);
+          const userSnap = await getDoc(userRef);
+
+          if (userSnap.exists()) {
+            const existingUser = { id: userSnap.id, ...userSnap.data() } as User;
             if (isUserAdmin && existingUser.role !== "ADMIN") {
-              await supabase.from('users').update({ role: "ADMIN" }).eq('id', uid);
-              setCurrentUser({ ...existingUser, role: "ADMIN" });
+              const updatedRole = "ADMIN";
+              await updateDoc(userRef, { role: updatedRole });
+              setCurrentUser({ ...existingUser, role: updatedRole });
             } else {
               setCurrentUser(existingUser);
             }
@@ -107,25 +141,29 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
               username: tgUser?.username ? `@${tgUser.username}` : `@user_${tgUser?.id || uid.substring(0,6)}`,
               points: 0,
               role: isUserAdmin ? "ADMIN" : "USER",
+              createdAt: new Date().toISOString()
             };
-            await supabase.from('users').insert([newUser]);
+            await setDoc(userRef, newUser);
             setCurrentUser(newUser as User);
           }
-        } else {
-          setIsLoading(false);
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, `users/${uid}`);
         }
-      } catch (err) {
-        console.error("Auth init failed", err);
-        setIsLoading(false);
+      } else {
+        signInAnonymously(auth).catch(err => {
+          console.error("Failed to sign in anonymously:", err);
+          setIsLoading(false);
+        });
       }
-    };
-
-    initAuth();
+    });
 
     return () => {
-      if (globalChannel) {
-        supabase.removeChannel(globalChannel);
-      }
+      unsubscribeAuth();
+      if (unsubTasks) unsubTasks();
+      if (unsubUsers) unsubUsers();
+      if (unsubSubs) unsubSubs();
+      if (unsubActs) unsubActs();
+      if (unsubRems) unsubRems();
     };
   }, []);
 
@@ -137,10 +175,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       type,
       timestamp: new Date().toISOString()
     };
+    
     try {
-      await supabase.from('activities').insert([newActivity]);
+      const docRef = doc(collection(db, 'activities'));
+      await setDoc(docRef, { id: docRef.id, ...newActivity });
     } catch (error) {
-      console.error(error);
+      handleFirestoreError(error, OperationType.CREATE, 'activities');
     }
   };
 
@@ -158,58 +198,63 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     };
     
     try {
-      await supabase.from('submissions').insert([newSubmission]);
+      const docRef = doc(collection(db, 'submissions'));
+      await setDoc(docRef, { id: docRef.id, ...newSubmission });
       logActivity(taskId, "SUBMIT_LINK");
     } catch (error) {
-      console.error(error);
+      handleFirestoreError(error, OperationType.CREATE, 'submissions');
     }
   };
 
   const updateEngagement = async (submissionId: string, likes: number, comments: number) => {
     try {
-      await supabase.from('submissions').update({ likes, comments }).eq('id', submissionId);
+      await updateDoc(doc(db, 'submissions', submissionId), { likes, comments });
     } catch (error) {
-      console.error(error);
+      handleFirestoreError(error, OperationType.UPDATE, `submissions/${submissionId}`);
     }
   };
 
   const addTask = async (task: Omit<Task, "id">) => {
     try {
-      await supabase.from('tasks').insert([{
+      const docRef = doc(collection(db, 'tasks'));
+      await setDoc(docRef, {
+        id: docRef.id,
         ...task,
         createdAt: new Date().toISOString()
-      }]);
+      });
     } catch (error) {
-      console.error(error);
+      handleFirestoreError(error, OperationType.CREATE, 'tasks');
     }
   };
 
   const deleteTask = async (taskId: string) => {
     try {
-      await supabase.from('tasks').delete().eq('id', taskId);
+      await deleteDoc(doc(db, 'tasks', taskId));
     } catch (error) {
-      console.error(error);
+      handleFirestoreError(error, OperationType.DELETE, `tasks/${taskId}`);
     }
   };
 
   const updateUserRole = async (userId: string, role: UserRole) => {
     try {
-      await supabase.from('users').update({ role }).eq('id', userId);
+      await updateDoc(doc(db, 'users', userId), { role });
     } catch (error) {
-      console.error(error);
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
     }
   };
 
   const addReminder = async (taskId: string, remindAt: string) => {
-    if (!currentUser || !isSupabaseConfigured) return;
+    if (!currentUser) return;
     
     try {
-      await supabase.from('reminders').insert([{
+      const docRef = doc(collection(db, 'reminders'));
+      await setDoc(docRef, {
+        id: docRef.id,
         taskId,
         userId: currentUser.id,
         remindAt,
         createdAt: new Date().toISOString()
-      }]);
+      });
       
       const timeToNotify = new Date(remindAt).getTime() - Date.now();
       if (timeToNotify > 0 && timeToNotify < 86400000) {
@@ -219,29 +264,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         }, timeToNotify);
       }
     } catch (error) {
-      console.error(error);
+      handleFirestoreError(error, OperationType.CREATE, 'reminders');
     }
   };
-
-  if (!isSupabaseConfigured) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-md p-6 border border-gray-200">
-          <h2 className="text-xl font-bold text-red-600 mb-4">Supabase Setup Required</h2>
-          <p className="text-gray-700 mb-4">
-            Please add the following variables to your project's environment variables:
-          </p>
-          <ul className="list-disc list-inside text-sm text-gray-600 space-y-2 mb-6">
-            <li><code className="bg-gray-100 px-1 py-0.5 rounded font-mono">VITE_SUPABASE_URL</code></li>
-            <li><code className="bg-gray-100 px-1 py-0.5 rounded font-mono">VITE_SUPABASE_ANON_KEY</code></li>
-          </ul>
-          <p className="text-sm text-gray-500">
-            You can find these in your Supabase project settings under API. Include them in the Settings menu and reload the app.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <AppContext.Provider value={{

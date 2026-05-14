@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "Social Collab Tracker",
+  "description": "A Telegram Mini App for coordinating social media content calendars and manually tracking engagement via submitted post links.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

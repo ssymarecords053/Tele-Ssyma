@@ -23,6 +23,8 @@ export const TaskDetailsPage = () => {
   const hasDownloaded = activities.some(
     a => a.taskId === id && a.userId === currentUser?.id && a.type === "DOWNLOAD_VIDEO"
   );
+  
+  const [isDownloadingLocal, setIsDownloadingLocal] = useState(false);
 
   const existingReminder = reminders.find(
     r => r.taskId === id && r.userId === currentUser?.id
@@ -175,10 +177,26 @@ export const TaskDetailsPage = () => {
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => {
-                  logActivity(task.id, "DOWNLOAD_VIDEO");
+                  if (!hasDownloaded && !isDownloadingLocal) {
+                    setIsDownloadingLocal(true);
+                    logActivity(task.id, "DOWNLOAD_VIDEO");
+                  }
+                  
                   if (WebApp?.initData) {
                     e.preventDefault();
-                    WebApp.openLink(task.videoUrl || "");
+                    if (task.videoUrl) {
+                      try {
+                        // @ts-ignore
+                        if (typeof WebApp.downloadFile === 'function' && WebApp.isVersionAtLeast?.('8.0')) {
+                          // @ts-ignore
+                          WebApp.downloadFile({ url: task.videoUrl, file_name: `task-video-${task.id}.mp4` });
+                        } else {
+                          WebApp.openLink(task.videoUrl);
+                        }
+                      } catch (err) {
+                        WebApp.openLink(task.videoUrl);
+                      }
+                    }
                   }
                 }}
                 className={cn(
