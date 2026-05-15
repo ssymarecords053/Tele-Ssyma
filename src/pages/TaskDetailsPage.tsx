@@ -177,32 +177,56 @@ export const TaskDetailsPage = () => {
                 href={task.videoUrl + (task.videoUrl.includes('?') ? '&' : '?') + 'download'}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={(e) => {
+                onClick={async (e) => {
                   if (!hasDownloaded && !isDownloadingLocal && !downloadTriggeredRef.current) {
                     downloadTriggeredRef.current = true;
                     setIsDownloadingLocal(true);
                     logActivity(task.id, "DOWNLOAD_VIDEO").catch(console.error);
                   }
-                  
-                  if (WebApp?.initData) {
-                    e.preventDefault();
-                    try {
-                      WebApp.showPopup({
-                        title: 'Download Video',
-                        message: 'For the best experience, please use the three dots (⋮) on the bottom right of the video player above and select "Download". If that doesn\'t work, we can open it in your browser.',
-                        buttons: [
-                          { id: 'browser', type: 'default', text: 'Open in Browser' },
-                          { type: 'cancel', text: 'Got it' }
-                        ]
-                      }, (buttonId) => {
-                        if (buttonId === 'browser') {
-                          WebApp.openLink(task.videoUrl, { try_instant_view: false });
-                        }
-                      });
-                    } catch (err) {
-                      // Fallback if showPopup fails
-                      WebApp.openLink(task.videoUrl, { try_instant_view: false });
+
+                  e.preventDefault();
+
+                  try {
+                    setIsSavingVideo(true);
+
+                    // 1. Try to use native Telegram download if available
+                    // @ts-ignore
+                    if (WebApp?.initData && typeof WebApp.downloadFile === 'function' && WebApp.isVersionAtLeast?.('8.0')) {
+                      // @ts-ignore
+                      WebApp.downloadFile({ url: task.videoUrl, file_name: `task-video-${task.id}.mp4` });
+                      return;
                     }
+
+                    // 2. Fetch it as a blob and download locally (works in most browsers/Telegram webviews)
+                    const response = await fetch(task.videoUrl);
+                    if (!response.ok) throw new Error("Failed to fetch video");
+                    
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = `task-video-${task.id}.mp4`;
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    // Cleanup
+                    setTimeout(() => {
+                      window.URL.revokeObjectURL(url);
+                      document.body.removeChild(a);
+                    }, 100);
+
+                  } catch (err) {
+                    console.error("Download fallback failed:", err);
+                    // 3. Last fallback: Open in external browser
+                    if (WebApp?.initData && WebApp.openLink) {
+                      WebApp.openLink(task.videoUrl);
+                    } else {
+                      window.open(task.videoUrl, '_blank');
+                    }
+                  } finally {
+                    setIsSavingVideo(false);
                   }
                 }}
                 className={cn(
