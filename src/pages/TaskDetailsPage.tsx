@@ -185,24 +185,30 @@ export const TaskDetailsPage = () => {
                   }
                   
                   if (WebApp?.initData) {
-                    // Check if native TWA download is available
-                    // @ts-ignore
-                    if (typeof WebApp.downloadFile === 'function' && WebApp.isVersionAtLeast?.('8.0')) {
-                      e.preventDefault();
-                      // @ts-ignore
-                      WebApp.downloadFile({ url: task.videoUrl, file_name: `task-video-${task.id}.mp4` });
-                    } else if (WebApp.platform === 'ios' || WebApp.platform === 'android') {
-                      e.preventDefault();
-                      // Open link forcing download via browser
-                      const downloadUrl = task.videoUrl + (task.videoUrl.includes('?') ? '&' : '?') + 'download';
-                      WebApp.openLink(downloadUrl);
+                    e.preventDefault();
+                    try {
+                      WebApp.showPopup({
+                        title: 'Download Video',
+                        message: 'For the best experience, please use the three dots (⋮) on the bottom right of the video player above and select "Download". If that doesn\'t work, we can open it in your browser.',
+                        buttons: [
+                          { id: 'browser', type: 'default', text: 'Open in Browser' },
+                          { type: 'cancel', text: 'Got it' }
+                        ]
+                      }, (buttonId) => {
+                        if (buttonId === 'browser') {
+                          WebApp.openLink(task.videoUrl, { try_instant_view: false });
+                        }
+                      });
+                    } catch (err) {
+                      // Fallback if showPopup fails
+                      WebApp.openLink(task.videoUrl, { try_instant_view: false });
                     }
                   }
                 }}
                 className={cn(
                   "flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold transition-colors",
                   hasDownloaded || isDownloadingLocal
-                    ? "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
+                    ? "bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
                     : "bg-gray-900 text-white hover:bg-gray-800",
                   isSavingVideo && "opacity-75 cursor-wait"
                 )}
@@ -218,9 +224,9 @@ export const TaskDetailsPage = () => {
                 ) : hasDownloaded || isDownloadingLocal ? (
                   <>
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
-                    Downloaded
+                    Download Again
                   </>
                 ) : (
                   <>
