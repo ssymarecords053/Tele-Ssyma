@@ -1,46 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import WebApp from "@twa-dev/sdk";
 import { Task, Submission, User, Activity, ActivityType, Reminder, UserRole } from "../types";
-import { db, auth } from "../lib/firebase";
-import { collection, doc, setDoc, updateDoc, deleteDoc, query, orderBy, onSnapshot, getDoc, where } from "firebase/firestore";
-import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid || null,
-      email: auth.currentUser?.email || null,
-      emailVerified: auth.currentUser?.emailVerified || null,
-      isAnonymous: auth.currentUser?.isAnonymous || null,
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  // In production, you might report this to a dashboard instead of crashing
-}
+import { supabase } from "../lib/supabase";
 
 interface AppContextType {
   tasks: Task[];
@@ -57,6 +18,7 @@ interface AppContextType {
   addReminder: (taskId: string, remindAt: string) => Promise<void>;
   updateUserRole: (userId: string, role: UserRole) => Promise<void>;
   isLoading: boolean;
+  isSupabaseConfigured: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -70,122 +32,165 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Authenticate & Fetch initial data
+  // Check if supabase variables are available
+  const isSupabaseConfigured = Boolean(
+    import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
+  );
+
+  // Initialize and load data
   useEffect(() => {
-    let unsubTasks: () => void;
-    let unsubUsers: () => void;
-    let unsubSubs: () => void;
-    let unsubActs: () => void;
-    let unsubRems: () => void;
+    let tasksChannel: any;
+    let usersChannel: any;
+    let subsChannel: any;
+    let actsChannel: any;
+    let remsChannel: any;
 
-    const setupListeners = (uid: string) => {
+    const loadData = async (uid: string) => {
       try {
-        const qTasks = query(collection(db, 'tasks'), orderBy('createdAt', 'desc'));
-        unsubTasks = onSnapshot(qTasks, (snapshot) => {
-          setTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task)));
-        }, (error) => handleFirestoreError(error, OperationType.GET, 'tasks'));
+        if (!isSupabaseConfigured) {
+          setIsLoading(false);
+          return;
+        }
 
-        unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-          setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User)));
-        }, (error) => handleFirestoreError(error, OperationType.GET, 'users'));
+        const [tasksRes, usersRes, subsRes, actsRes, remsRes] = await Promise.all([
+          supabase.from("tasks").select("*").order("createdAt", { ascending: false }),
+          supabase.from("users").select("*"),
+          supabase.from("submissions").select("*").order("submittedAt", { ascending: false }),
+          supabase.from("activities").select("*").order("timestamp", { ascending: false }),
+          supabase.from("reminders").select("*").eq("userId", uid)
+        ]);
 
-        const qSubs = query(collection(db, 'submissions'), orderBy('submittedAt', 'desc'));
-        unsubSubs = onSnapshot(qSubs, (snapshot) => {
-          setSubmissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Submission)));
-        }, (error) => handleFirestoreError(error, OperationType.GET, 'submissions'));
+        if (tasksRes.data) setTasks(tasksRes.data as Task[]);
+        if (usersRes.data) setUsers(usersRes.data as User[]);
+        if (subsRes.data) setSubmissions(subsRes.data as Submission[]);
+        if (actsRes.data) setActivities(actsRes.data as Activity[]);
+        if (remsRes.data) setReminders(remsRes.data as Reminder[]);
 
-        const qActs = query(collection(db, 'activities'), orderBy('timestamp', 'desc'));
-        unsubActs = onSnapshot(qActs, (snapshot) => {
-          setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Activity)));
-        }, (error) => handleFirestoreError(error, OperationType.GET, 'activities'));
+        // Real-time subscriptions
+        tasksChannel = supabase.channel('tasks_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, payload => {
+            if (payload.eventType === 'INSERT') setTasks(prev => [payload.new as Task, ...prev]);
+            if (payload.eventType === 'DELETE') setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+            if (payload.eventType === 'UPDATE') setTasks(prev => prev.map(t => t.id === payload.new.id ? payload.new as Task : t));
+        }).subscribe();
 
-        unsubRems = onSnapshot(query(collection(db, 'reminders'), where('userId', '==', uid)), (snapshot) => {
-          setReminders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reminder)));
-        }, (error) => handleFirestoreError(error, OperationType.GET, 'reminders'));
+        usersChannel = supabase.channel('users_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, payload => {
+            if (payload.eventType === 'INSERT') setUsers(prev => [payload.new as User, ...prev]);
+            if (payload.eventType === 'UPDATE') setUsers(prev => prev.map(u => u.id === payload.new.id ? payload.new as User : u));
+        }).subscribe();
+
+        subsChannel = supabase.channel('subs_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'submissions' }, payload => {
+            if (payload.eventType === 'INSERT') setSubmissions(prev => [payload.new as Submission, ...prev]);
+            if (payload.eventType === 'UPDATE') setSubmissions(prev => prev.map(s => s.id === payload.new.id ? payload.new as Submission : s));
+        }).subscribe();
+
+        actsChannel = supabase.channel('acts_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'activities' }, payload => {
+            if (payload.eventType === 'INSERT') setActivities(prev => [payload.new as Activity, ...prev]);
+        }).subscribe();
+        
+        remsChannel = supabase.channel('rems_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'reminders', filter: `userId=eq.${uid}` }, payload => {
+            if (payload.eventType === 'INSERT') setReminders(prev => [payload.new as Reminder, ...prev]);
+        }).subscribe();
+        
       } catch (error) {
-        console.error("Error setting up listeners:", error);
+        console.error("Error loading data from Supabase:", error);
       } finally {
         setIsLoading(false);
       }
     };
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const uid = user.uid;
-        setupListeners(uid);
-        
-        // Sync Telegram user to Firebase
-        const tgUser = WebApp.initDataUnsafe?.user;
-        
-        try {
-          // @ts-ignore
-          const adminId = import.meta.env.VITE_ADMIN_TELEGRAM_ID;
-          const isUserAdmin = adminId && tgUser && tgUser.id.toString() === adminId;
-          
-          const userRef = doc(db, 'users', uid);
-          const userSnap = await getDoc(userRef);
+    const initAuth = async () => {
+      // In a Telegram Mini App, we usually use the Telegram user ID as the auth method.
+      // If Supabase allows arbitrary user ids, or if we use row-level-security with custom JWTs,
+      // it would be more complex. For this application, we manage auth by recognizing the Telegram ID.
+      const tgUser = WebApp.initDataUnsafe?.user;
+      
+      if (tgUser) {
+        const uid = tgUser.id.toString();
+        // @ts-ignore
+        const adminId = import.meta.env.VITE_ADMIN_TELEGRAM_ID;
+        const isUserAdmin = adminId && uid === adminId;
 
-          if (userSnap.exists()) {
-            const existingUser = { id: userSnap.id, ...userSnap.data() } as User;
-            if (isUserAdmin && existingUser.role !== "ADMIN") {
-              const updatedRole = "ADMIN";
-              await updateDoc(userRef, { role: updatedRole });
-              setCurrentUser({ ...existingUser, role: updatedRole });
+        if (isSupabaseConfigured) {
+          try {
+            // Check if user exists
+            const { data: existingUser } = await supabase.from('users').select('*').eq('id', uid).single();
+            
+            if (existingUser) {
+              if (isUserAdmin && existingUser.role !== "ADMIN") {
+                const updatedRole = "ADMIN";
+                await supabase.from('users').update({ role: updatedRole }).eq('id', uid);
+                setCurrentUser({ ...existingUser, role: updatedRole } as User);
+              } else {
+                setCurrentUser(existingUser as User);
+              }
             } else {
-              setCurrentUser(existingUser);
+              const newUser = {
+                id: uid,
+                name: tgUser.first_name + (tgUser.last_name ? ` ${tgUser.last_name}` : ""),
+                username: tgUser.username ? `@${tgUser.username}` : `@user_${uid.substring(0,6)}`,
+                points: 0,
+                role: isUserAdmin ? "ADMIN" : "USER",
+              };
+              
+              const { error: insertError } = await supabase.from('users').insert([newUser]);
+              if (!insertError) {
+                setCurrentUser(newUser as User);
+              } else {
+                console.error("Failed to create user", insertError);
+                // Fallback for simple display if insert fails
+                setCurrentUser(newUser as User);
+              }
             }
-          } else {
-            const newUser = {
-              id: uid,
-              name: tgUser ? tgUser.first_name + (tgUser.last_name ? ` ${tgUser.last_name}` : "") : `User_${uid.substring(0,6)}`,
-              username: tgUser?.username ? `@${tgUser.username}` : `@user_${tgUser?.id || uid.substring(0,6)}`,
-              points: 0,
-              role: isUserAdmin ? "ADMIN" : "USER",
-              createdAt: new Date().toISOString()
-            };
-            await setDoc(userRef, newUser);
-            setCurrentUser(newUser as User);
+          } catch (e) {
+            console.error("Auth error", e);
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${uid}`);
+        } else {
+           // Fallback state if supabase is not connected
+           setCurrentUser({
+            id: uid,
+            name: tgUser.first_name + (tgUser.last_name ? ` ${tgUser.last_name}` : ""),
+            username: tgUser.username ? `@${tgUser.username}` : `@user_${uid.substring(0,6)}`,
+            points: 0,
+            role: isUserAdmin ? "ADMIN" : "USER"
+          });
         }
+        
+        loadData(uid);
       } else {
-        signInAnonymously(auth).catch(err => {
-          console.error("Failed to sign in anonymously:", err);
-          setIsLoading(false);
-        });
+        // Not inside telegram
+        setCurrentUser(null);
+        setIsLoading(false);
       }
-    });
+    };
+
+    initAuth();
 
     return () => {
-      unsubscribeAuth();
-      if (unsubTasks) unsubTasks();
-      if (unsubUsers) unsubUsers();
-      if (unsubSubs) unsubSubs();
-      if (unsubActs) unsubActs();
-      if (unsubRems) unsubRems();
+      if (tasksChannel) supabase.removeChannel(tasksChannel);
+      if (usersChannel) supabase.removeChannel(usersChannel);
+      if (subsChannel) supabase.removeChannel(subsChannel);
+      if (actsChannel) supabase.removeChannel(actsChannel);
+      if (remsChannel) supabase.removeChannel(remsChannel);
     };
-  }, []);
+  }, [isSupabaseConfigured]);
 
   const logActivity = async (taskId: string, type: ActivityType) => {
-    if (!currentUser) return;
+    if (!currentUser || !isSupabaseConfigured) return;
     const newActivity = {
       userId: currentUser.id,
       taskId,
       type,
-      timestamp: new Date().toISOString()
     };
     
     try {
-      const docRef = doc(collection(db, 'activities'));
-      await setDoc(docRef, { id: docRef.id, ...newActivity });
+      await supabase.from('activities').insert([newActivity]);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'activities');
+      console.error(error);
     }
   };
 
   const submitLink = async (taskId: string, link: string) => {
-    if (!currentUser) return;
+    if (!currentUser || !isSupabaseConfigured) return;
     
     const newSubmission = {
       taskId,
@@ -193,68 +198,62 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       userName: currentUser.name,
       link,
       likes: 0,
-      comments: 0,
-      submittedAt: new Date().toISOString()
+      comments: 0
     };
     
     try {
-      const docRef = doc(collection(db, 'submissions'));
-      await setDoc(docRef, { id: docRef.id, ...newSubmission });
-      logActivity(taskId, "SUBMIT_LINK");
+      await supabase.from('submissions').insert([newSubmission]);
+      await logActivity(taskId, "SUBMIT_LINK");
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'submissions');
+      console.error(error);
     }
   };
 
   const updateEngagement = async (submissionId: string, likes: number, comments: number) => {
+    if (!isSupabaseConfigured) return;
     try {
-      await updateDoc(doc(db, 'submissions', submissionId), { likes, comments });
+      await supabase.from('submissions').update({ likes, comments }).eq('id', submissionId);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `submissions/${submissionId}`);
+      console.error(error);
     }
   };
 
   const addTask = async (task: Omit<Task, "id">) => {
+    if (!isSupabaseConfigured) return;
     try {
-      const docRef = doc(collection(db, 'tasks'));
-      await setDoc(docRef, {
-        id: docRef.id,
-        ...task,
-        createdAt: new Date().toISOString()
-      });
+      await supabase.from('tasks').insert([task]);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'tasks');
+        console.error(error);
     }
   };
 
   const deleteTask = async (taskId: string) => {
+    if (!isSupabaseConfigured) return;
     try {
-      await deleteDoc(doc(db, 'tasks', taskId));
+      await supabase.from('tasks').delete().eq('id', taskId);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `tasks/${taskId}`);
+      console.error(error);
     }
   };
 
   const updateUserRole = async (userId: string, role: UserRole) => {
+    if (!isSupabaseConfigured) return;
     try {
-      await updateDoc(doc(db, 'users', userId), { role });
+      await supabase.from('users').update({ role }).eq('id', userId);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+      console.error(error);
     }
   };
 
   const addReminder = async (taskId: string, remindAt: string) => {
-    if (!currentUser) return;
+    if (!currentUser || !isSupabaseConfigured) return;
     
     try {
-      const docRef = doc(collection(db, 'reminders'));
-      await setDoc(docRef, {
-        id: docRef.id,
+      await supabase.from('reminders').insert([{
         taskId,
         userId: currentUser.id,
-        remindAt,
-        createdAt: new Date().toISOString()
-      });
+        remindAt
+      }]);
       
       const timeToNotify = new Date(remindAt).getTime() - Date.now();
       if (timeToNotify > 0 && timeToNotify < 86400000) {
@@ -264,7 +263,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         }, timeToNotify);
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'reminders');
+      console.error(error);
     }
   };
 
@@ -283,7 +282,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       logActivity,
       addReminder,
       updateUserRole,
-      isLoading
+      isLoading,
+      isSupabaseConfigured
     }}>
       {children}
     </AppContext.Provider>
