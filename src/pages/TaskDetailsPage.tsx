@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import WebApp from "@twa-dev/sdk";
 import { useAppContext } from "../store/AppContext";
@@ -25,6 +25,8 @@ export const TaskDetailsPage = () => {
   );
   
   const [isDownloadingLocal, setIsDownloadingLocal] = useState(false);
+  const [isSavingVideo, setIsSavingVideo] = useState(false);
+  const downloadTriggeredRef = useRef(false);
 
   const existingReminder = reminders.find(
     r => r.taskId === id && r.userId === currentUser?.id
@@ -176,37 +178,74 @@ export const TaskDetailsPage = () => {
                 download={`task-video-${task.id}.mp4`}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={(e) => {
-                  if (!hasDownloaded && !isDownloadingLocal) {
+                onClick={async (e) => {
+                  if (isSavingVideo) {
+                    e.preventDefault();
+                    return;
+                  }
+
+                  if (!hasDownloaded && !isDownloadingLocal && !downloadTriggeredRef.current) {
+                    downloadTriggeredRef.current = true;
                     setIsDownloadingLocal(true);
-                    logActivity(task.id, "DOWNLOAD_VIDEO");
+                    logActivity(task.id, "DOWNLOAD_VIDEO").catch(console.error);
                   }
                   
                   if (WebApp?.initData) {
                     e.preventDefault();
                     if (task.videoUrl) {
                       try {
+                        // Check if native TWA download is available natively
                         // @ts-ignore
                         if (typeof WebApp.downloadFile === 'function' && WebApp.isVersionAtLeast?.('8.0')) {
                           // @ts-ignore
                           WebApp.downloadFile({ url: task.videoUrl, file_name: `task-video-${task.id}.mp4` });
-                        } else {
-                          WebApp.openLink(task.videoUrl);
+                          return;
                         }
+
+                        // Fallback to Blob fetching for real download instead of playing in browser
+                        setIsSavingVideo(true);
+                        const response = await fetch(task.videoUrl);
+                        if (!response.ok) throw new Error("Failed to fetch video");
+                        
+                        const blob = await response.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `task-video-${task.id}.mp4`;
+                        document.body.appendChild(a);
+                        a.click();
+                        
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        
                       } catch (err) {
+                        console.error('Download failed:', err);
+                        // Complete fallback
                         WebApp.openLink(task.videoUrl);
+                      } finally {
+                        setIsSavingVideo(false);
                       }
                     }
                   }
                 }}
                 className={cn(
                   "flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold transition-colors",
-                  hasDownloaded
+                  hasDownloaded || isDownloadingLocal
                     ? "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
-                    : "bg-gray-900 text-white hover:bg-gray-800"
+                    : "bg-gray-900 text-white hover:bg-gray-800",
+                  isSavingVideo && "opacity-75 cursor-wait"
                 )}
               >
-                {hasDownloaded ? (
+                {isSavingVideo ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Saving...
+                  </>
+                ) : hasDownloaded || isDownloadingLocal ? (
                   <>
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />

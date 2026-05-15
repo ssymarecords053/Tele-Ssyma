@@ -127,6 +127,7 @@ export const TasksPage = () => {
           <button
             onClick={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               if (window.confirm("Are you sure you want to delete this task?")) {
                 deleteTask(task.id);
               }
