@@ -69,23 +69,29 @@ export const TaskDetailsPage = () => {
     WebApp?.showAlert ? WebApp.showAlert(message) : alert(message);
   };
 
-  const handleDownload = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault();
-
+  const handleDownload = () => {
     // Always log + update UI on every click — no guards
     setHasDownloaded(true);
     logActivity(task.id, "DOWNLOAD_VIDEO").catch(console.error);
 
-    // 1. Telegram native download (v8.0+)
+    // 1. Telegram native downloadFile — just check if it exists, skip version parsing
     // @ts-ignore
-    if (typeof WebApp?.downloadFile === "function" && WebApp.isVersionAtLeast?.("8.0")) {
-      // @ts-ignore
-      WebApp.downloadFile({ url: task.videoUrl, file_name: `task-video-${task.id}.mp4` });
-      return;
+    if (typeof WebApp?.downloadFile === "function") {
+      try {
+        // @ts-ignore
+        WebApp.downloadFile({
+          url: task.videoUrl,
+          file_name: `task-video-${task.id}.mp4`,
+        });
+        return;
+      } catch (err) {
+        console.warn("WebApp.downloadFile failed:", err);
+        // fall through to next option
+      }
     }
 
-    // 2. Open in Telegram's external browser
-    if (WebApp?.openLink) {
+    // 2. Open in external browser (user can long-press > Save Video)
+    if (typeof WebApp?.openLink === "function") {
       WebApp.openLink(task.videoUrl);
       return;
     }
@@ -199,8 +205,8 @@ export const TaskDetailsPage = () => {
               <div className="aspect-video bg-black rounded-xl overflow-hidden relative mb-3">
                 <video src={task.videoUrl} controls className="w-full h-full object-cover" />
               </div>
-              <a
-                href={task.videoUrl}
+              {/* button instead of <a> — avoids WebView anchor navigation issues */}
+              <button
                 onClick={handleDownload}
                 className={cn(
                   "flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold transition-colors",
@@ -213,7 +219,7 @@ export const TaskDetailsPage = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
                 {hasDownloaded ? "Download Again" : "Download Video for Telegram"}
-              </a>
+              </button>
             </div>
           )}
         </div>
