@@ -17,6 +17,7 @@ export const TaskDetailsPage = () => {
     logActivity,
     reminders,
     addReminder,
+    activities,
   } = useAppContext();
 
   const [linkInput, setLinkInput] = useState("");
@@ -30,6 +31,9 @@ export const TaskDetailsPage = () => {
   const existingReminder = reminders.find(
     (r) => r.taskId === id && r.userId === currentUser?.id
   );
+  const hasPreviouslyDownloaded = activities.some(
+    (a) => a.taskId === id && a.userId === currentUser?.id && a.type === "DOWNLOAD_VIDEO"
+  );
 
   if (!task) {
     return (
@@ -42,9 +46,8 @@ export const TaskDetailsPage = () => {
     );
   }
 
-  const isFullyCompleted = !!existingSubmission && (!task.videoUrl || hasDownloaded);
+  const isFullyCompleted = !!existingSubmission && (!task.videoUrl || hasDownloaded || hasPreviouslyDownloaded);
   const formattedDate = format(parseISO(task.date), "EEEE, MMMM do, yyyy");
-
   const allSubmissionsForTask = submissions.filter((s) => s.taskId === task.id);
   const totalLikes = allSubmissionsForTask.reduce((acc, sub) => acc + sub.likes, 0);
   const totalComments = allSubmissionsForTask.reduce((acc, sub) => acc + sub.comments, 0);
@@ -70,9 +73,10 @@ export const TaskDetailsPage = () => {
   };
 
   const handleDownload = () => {
-    // Always log + update UI on every click — no guards
     setHasDownloaded(true);
-    logActivity(task.id, "DOWNLOAD_VIDEO").catch(console.error);
+    if (!hasPreviouslyDownloaded && !hasDownloaded) {
+      logActivity(task.id, "DOWNLOAD_VIDEO").catch(console.error);
+    }
 
     // 1. Telegram native downloadFile — just check if it exists, skip version parsing
     // @ts-ignore
@@ -210,7 +214,7 @@ export const TaskDetailsPage = () => {
                 onClick={handleDownload}
                 className={cn(
                   "flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold transition-colors",
-                  hasDownloaded
+                  hasDownloaded || hasPreviouslyDownloaded
                     ? "bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
                     : "bg-gray-900 text-white hover:bg-gray-800"
                 )}
@@ -218,7 +222,7 @@ export const TaskDetailsPage = () => {
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
-                {hasDownloaded ? "Download Again" : "Download Video for Telegram"}
+                {hasDownloaded || hasPreviouslyDownloaded ? "Download Again" : "Download Video for Telegram"}
               </button>
             </div>
           )}
