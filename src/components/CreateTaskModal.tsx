@@ -120,22 +120,59 @@ export const CreateTaskModal = ({ onClose }: { onClose: () => void }) => {
                           type="file"
                           accept="video/*"
                           className="sr-only"
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             if (e.target.files && e.target.files[0]) {
                               const file = e.target.files[0];
-                              setIsUploading(true);
-                              setUploadProgress(0);
                               
-                              let progress = 0;
-                              const interval = setInterval(() => {
-                                progress += 10;
-                                setUploadProgress(progress);
-                                if (progress >= 100) {
-                                  clearInterval(interval);
-                                  setVideoUrl(URL.createObjectURL(file));
+                              if (file.size > 50 * 1024 * 1024) {
+                                alert("File size must be exactly or less than 50MB");
+                                return;
+                              }
+
+                              setIsUploading(true);
+                              setUploadProgress(10);
+                              
+                              try {
+                                const formData = new FormData();
+                                formData.append("file", file);
+                                formData.append("upload_preset", "sfz2efyw");
+
+                                const xhr = new XMLHttpRequest();
+                                xhr.open("POST", "https://api.cloudinary.com/v1_1/daxpgmju9/video/upload", true);
+
+                                xhr.upload.onprogress = (e) => {
+                                  if (e.lengthComputable) {
+                                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                                    setUploadProgress(percentComplete);
+                                  }
+                                };
+
+                                xhr.onload = () => {
+                                  if (xhr.status === 200) {
+                                    const data = JSON.parse(xhr.responseText);
+                                    setVideoUrl(data.secure_url);
+                                    setUploadProgress(100);
+                                    setIsUploading(false);
+                                  } else {
+                                    const errorData = JSON.parse(xhr.responseText);
+                                    console.error("Upload error:", errorData);
+                                    alert("Failed to upload video to Cloudinary. Error: " + (errorData.error?.message || "Upload failed"));
+                                    setIsUploading(false);
+                                  }
+                                };
+
+                                xhr.onerror = () => {
+                                  console.error("Upload error");
+                                  alert("Failed to upload video to Cloudinary. Network error.");
                                   setIsUploading(false);
-                                }
-                              }, 150);
+                                };
+
+                                xhr.send(formData);
+                              } catch (err: any) {
+                                console.error("Upload error:", err);
+                                alert("Failed to upload video to Cloudinary. Error: " + err.message);
+                                setIsUploading(false);
+                              }
                             }
                           }}
                         />
