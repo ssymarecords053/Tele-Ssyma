@@ -174,16 +174,10 @@ export const TaskDetailsPage = () => {
                 <video src={task.videoUrl} controls className="w-full h-full object-cover" />
               </div>
               <a
-                href={task.videoUrl}
-                download={`task-video-${task.id}.mp4`}
+                href={task.videoUrl + (task.videoUrl.includes('?') ? '&' : '?') + 'download'}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={async (e) => {
-                  if (isSavingVideo) {
-                    e.preventDefault();
-                    return;
-                  }
-
+                onClick={(e) => {
                   if (!hasDownloaded && !isDownloadingLocal && !downloadTriggeredRef.current) {
                     downloadTriggeredRef.current = true;
                     setIsDownloadingLocal(true);
@@ -191,41 +185,17 @@ export const TaskDetailsPage = () => {
                   }
                   
                   if (WebApp?.initData) {
-                    e.preventDefault();
-                    if (task.videoUrl) {
-                      try {
-                        // Check if native TWA download is available natively
-                        // @ts-ignore
-                        if (typeof WebApp.downloadFile === 'function' && WebApp.isVersionAtLeast?.('8.0')) {
-                          // @ts-ignore
-                          WebApp.downloadFile({ url: task.videoUrl, file_name: `task-video-${task.id}.mp4` });
-                          return;
-                        }
-
-                        // Fallback to Blob fetching for real download instead of playing in browser
-                        setIsSavingVideo(true);
-                        const response = await fetch(task.videoUrl);
-                        if (!response.ok) throw new Error("Failed to fetch video");
-                        
-                        const blob = await response.blob();
-                        const url = window.URL.createObjectURL(blob);
-                        
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `task-video-${task.id}.mp4`;
-                        document.body.appendChild(a);
-                        a.click();
-                        
-                        window.URL.revokeObjectURL(url);
-                        document.body.removeChild(a);
-                        
-                      } catch (err) {
-                        console.error('Download failed:', err);
-                        // Complete fallback
-                        WebApp.openLink(task.videoUrl);
-                      } finally {
-                        setIsSavingVideo(false);
-                      }
+                    // Check if native TWA download is available
+                    // @ts-ignore
+                    if (typeof WebApp.downloadFile === 'function' && WebApp.isVersionAtLeast?.('8.0')) {
+                      e.preventDefault();
+                      // @ts-ignore
+                      WebApp.downloadFile({ url: task.videoUrl, file_name: `task-video-${task.id}.mp4` });
+                    } else if (WebApp.platform === 'ios' || WebApp.platform === 'android') {
+                      e.preventDefault();
+                      // Open link forcing download via browser
+                      const downloadUrl = task.videoUrl + (task.videoUrl.includes('?') ? '&' : '?') + 'download';
+                      WebApp.openLink(downloadUrl);
                     }
                   }
                 }}
