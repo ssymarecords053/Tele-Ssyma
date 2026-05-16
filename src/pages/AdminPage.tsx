@@ -30,7 +30,16 @@ export const AdminPage = () => {
     return acc;
   }, {} as Record<string, typeof submissions>);
 
-  const sortedUsers = [...users].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedUsers = [...users].sort((a, b) => {
+    const subsA = submissionsByUser[a.id] || [];
+    const subsB = submissionsByUser[b.id] || [];
+    const engA = subsA.reduce((acc, sub) => acc + sub.likes + sub.comments, 0);
+    const engB = subsB.reduce((acc, sub) => acc + sub.likes + sub.comments, 0);
+    if (engB !== engA) {
+      return engB - engA;
+    }
+    return a.name.localeCompare(b.name);
+  });
 
   const filteredTasks = tasks.filter(task => {
     if (taskSearch && !task.title.toLowerCase().includes(taskSearch.toLowerCase())) return false;
@@ -229,11 +238,12 @@ export const AdminPage = () => {
         <div className="space-y-4">
           {!selectedUserId ? (
             <div className="bg-white rounded-[32px] p-6 shadow-sm border border-gray-100">
-              <h2 className="font-bold text-gray-900 mb-4">User Rankings (A-Z)</h2>
+              <h2 className="font-bold text-gray-900 mb-4">User Rankings (By Engagement)</h2>
               <div className="space-y-3">
                 {sortedUsers.map(user => {
                   const userSubs = submissionsByUser[user.id] || [];
                   const totalLikes = userSubs.reduce((acc, sub) => acc + sub.likes, 0);
+                  const totalComments = userSubs.reduce((acc, sub) => acc + sub.comments, 0);
                   return (
                     <div 
                       key={user.id} 
@@ -242,11 +252,13 @@ export const AdminPage = () => {
                     >
                       <div>
                         <p className="font-bold text-sm text-gray-900">{user.name}</p>
-                        <p className="text-xs text-gray-500 font-medium mt-0.5">@{user.username || "anonymous"}</p>
+                        <p className="text-xs text-gray-500 font-medium mt-0.5">
+                          {user.username ? (user.username.startsWith('@') ? user.username : `@${user.username}`) : "@anonymous"}
+                        </p>
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-bold text-blue-600">{userSubs.length} links</p>
-                        <p className="text-xs text-gray-500 font-medium mt-0.5">{totalLikes} total likes</p>
+                        <p className="text-xs text-gray-500 font-medium mt-0.5">{totalLikes} likes, {totalComments} comments</p>
                       </div>
                     </div>
                   );
