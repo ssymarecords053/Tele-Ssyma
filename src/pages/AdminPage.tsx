@@ -16,6 +16,9 @@ export const AdminPage = () => {
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
 
+  const [userStartDate, setUserStartDate] = useState<string>("");
+  const [userEndDate, setUserEndDate] = useState<string>("");
+
   // Group submissions by task
   const submissionsByTask = submissions.reduce((acc, sub) => {
     if (!acc[sub.taskId]) acc[sub.taskId] = [];
@@ -267,7 +270,7 @@ export const AdminPage = () => {
             </div>
           ) : (
             <div>
-              <div className="mb-4">
+              <div className="mb-4 flex items-center justify-between">
                 <button 
                   onClick={() => setSelectedUserId(null)}
                   className="text-sm font-bold text-gray-500 flex items-center gap-1 hover:text-gray-900"
@@ -275,6 +278,31 @@ export const AdminPage = () => {
                   <ChevronDown className="w-4 h-4 rotate-90" /> Back to Users
                 </button>
               </div>
+
+              <div className="bg-white rounded-3xl p-4 shadow-sm border border-gray-100 mb-6 space-y-3">
+                <h3 className="font-bold text-gray-900 text-sm">Filter by Curated Date (Task Date)</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1 ml-1">From Date</label>
+                    <input
+                      type="date"
+                      value={userStartDate}
+                      onChange={(e) => setUserStartDate(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1 ml-1">To Date</label>
+                    <input
+                      type="date"
+                      value={userEndDate}
+                      onChange={(e) => setUserEndDate(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-200">
                 <div className="p-4 border-b border-gray-100 bg-gray-50/50">
                   <h3 className="font-bold text-gray-900">
@@ -283,6 +311,13 @@ export const AdminPage = () => {
                 </div>
                 <div className="divide-y divide-gray-100">
                   {(submissionsByUser[selectedUserId] || [])
+                    .filter(sub => {
+                      const task = tasks.find(t => t.id === sub.taskId);
+                      if (!task) return true; // keep if task missing
+                      if (userStartDate && task.date < userStartDate) return false;
+                      if (userEndDate && task.date > userEndDate) return false;
+                      return true;
+                    })
                     .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
                     .map(sub => {
                       const task = tasks.find(t => t.id === sub.taskId);
@@ -293,8 +328,11 @@ export const AdminPage = () => {
                           <div className="flex justify-between items-start mb-3">
                             <div>
                               <div className="font-bold text-sm text-gray-900">{task?.title || "Unknown Task"}</div>
+                              <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mt-1 mb-0.5">
+                                Curated: {task?.date ? format(parseISO(task.date), "MMM d, yyyy") : "Unknown"}
+                              </div>
                               <div className="text-xs text-gray-500 font-medium mt-0.5">
-                                {format(parseISO(sub.submittedAt), "MMM d, yyyy h:mm a")}
+                                Submitted: {format(parseISO(sub.submittedAt), "MMM d, yyyy h:mm a")}
                               </div>
                             </div>
                             <a 
