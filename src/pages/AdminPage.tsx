@@ -8,7 +8,8 @@ export const AdminPage = () => {
   const [editingSub, setEditingSub] = useState<string | null>(null);
   const [likesInput, setLikesInput] = useState(0);
   const [commentsInput, setCommentsInput] = useState(0);
-  const [activeTab, setActiveTab] = useState<"submissions" | "users">("submissions");
+  const [activeTab, setActiveTab] = useState<"submissions" | "users" | "user-rankings">("submissions");
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   
   // Filtering state
   const [taskSearch, setTaskSearch] = useState<string>("");
@@ -21,6 +22,15 @@ export const AdminPage = () => {
     acc[sub.taskId].push(sub);
     return acc;
   }, {} as Record<string, typeof submissions>);
+
+  // Group submissions by user for rankings tab
+  const submissionsByUser = submissions.reduce((acc, sub) => {
+    if (!acc[sub.userId]) acc[sub.userId] = [];
+    acc[sub.userId].push(sub);
+    return acc;
+  }, {} as Record<string, typeof submissions>);
+
+  const sortedUsers = [...users].sort((a, b) => a.name.localeCompare(b.name));
 
   const filteredTasks = tasks.filter(task => {
     if (taskSearch && !task.title.toLowerCase().includes(taskSearch.toLowerCase())) return false;
@@ -51,18 +61,24 @@ export const AdminPage = () => {
         </div>
       </div>
 
-      <div className="flex bg-gray-200/60 p-1 rounded-xl mb-6">
+      <div className="flex bg-gray-200/60 p-1 rounded-xl mb-6 overflow-x-auto">
         <button
-          className={cn("flex-1 py-1.5 text-sm font-bold rounded-lg transition-colors", activeTab === "submissions" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-900")}
+          className={cn("flex-1 whitespace-nowrap px-3 py-1.5 text-sm font-bold rounded-lg transition-colors", activeTab === "submissions" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-900")}
           onClick={() => setActiveTab("submissions")}
         >
-          Submissions
+          By Task
         </button>
         <button
-          className={cn("flex-1 py-1.5 text-sm font-bold rounded-lg transition-colors", activeTab === "users" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-900")}
+          className={cn("flex-1 whitespace-nowrap px-3 py-1.5 text-sm font-bold rounded-lg transition-colors", activeTab === "user-rankings" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-900")}
+          onClick={() => { setActiveTab("user-rankings"); setSelectedUserId(null); }}
+        >
+          User Rankings
+        </button>
+        <button
+          className={cn("flex-1 whitespace-nowrap px-3 py-1.5 text-sm font-bold rounded-lg transition-colors", activeTab === "users" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-900")}
           onClick={() => setActiveTab("users")}
         >
-          Users & Roles
+          Roles
         </button>
       </div>
 
@@ -143,8 +159,8 @@ export const AdminPage = () => {
                       </div>
 
                       {isEditing ? (
-                        <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-3 flex items-end gap-3">
-                          <div className="flex-1">
+                        <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-3 flex items-end gap-3 flex-wrap">
+                          <div className="flex-1 w-full min-w-[100px]">
                             <label className="block text-xs font-bold text-gray-600 uppercase mb-1 ml-1">Likes</label>
                             <input
                               type="number"
@@ -154,7 +170,7 @@ export const AdminPage = () => {
                               className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                             />
                           </div>
-                          <div className="flex-1">
+                          <div className="flex-1 w-full min-w-[100px]">
                             <label className="block text-xs font-bold text-gray-600 uppercase mb-1 ml-1">Comments</label>
                             <input
                               type="number"
@@ -164,12 +180,14 @@ export const AdminPage = () => {
                               className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                             />
                           </div>
-                          <button
-                            onClick={() => handleSave(sub.id)}
-                            className="bg-blue-600 text-white p-2.5 rounded-xl hover:bg-blue-700 h-[38px] w-[38px] flex justify-center items-center flex-shrink-0 shadow-sm"
-                          >
-                            <Save className="w-4 h-4" />
-                          </button>
+                          <div className="flex gap-2 w-full justify-end mt-2">
+                            <button
+                              onClick={() => handleSave(sub.id)}
+                              className="bg-blue-600 text-white px-3 py-1.5 rounded-xl hover:bg-blue-700 flex justify-center items-center flex-shrink-0 shadow-sm text-xs font-bold flex-1 max-w-[80px]"
+                            >
+                              Save
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <div 
@@ -207,6 +225,141 @@ export const AdminPage = () => {
         )}
         </div>
         </>
+      ) : activeTab === "user-rankings" ? (
+        <div className="space-y-4">
+          {!selectedUserId ? (
+            <div className="bg-white rounded-[32px] p-6 shadow-sm border border-gray-100">
+              <h2 className="font-bold text-gray-900 mb-4">User Rankings (A-Z)</h2>
+              <div className="space-y-3">
+                {sortedUsers.map(user => {
+                  const userSubs = submissionsByUser[user.id] || [];
+                  const totalLikes = userSubs.reduce((acc, sub) => acc + sub.likes, 0);
+                  return (
+                    <div 
+                      key={user.id} 
+                      onClick={() => setSelectedUserId(user.id)}
+                      className="flex items-center justify-between p-4 rounded-2xl border border-gray-100 bg-gray-50/50 cursor-pointer hover:bg-gray-100 transition-colors"
+                    >
+                      <div>
+                        <p className="font-bold text-sm text-gray-900">{user.name}</p>
+                        <p className="text-xs text-gray-500 font-medium mt-0.5">@{user.username || "anonymous"}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-blue-600">{userSubs.length} links</p>
+                        <p className="text-xs text-gray-500 font-medium mt-0.5">{totalLikes} total likes</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="mb-4">
+                <button 
+                  onClick={() => setSelectedUserId(null)}
+                  className="text-sm font-bold text-gray-500 flex items-center gap-1 hover:text-gray-900"
+                >
+                  <ChevronDown className="w-4 h-4 rotate-90" /> Back to Users
+                </button>
+              </div>
+              <div className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-200">
+                <div className="p-4 border-b border-gray-100 bg-gray-50/50">
+                  <h3 className="font-bold text-gray-900">
+                    {users.find(u => u.id === selectedUserId)?.name}'s Submissions
+                  </h3>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {(submissionsByUser[selectedUserId] || [])
+                    .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
+                    .map(sub => {
+                      const task = tasks.find(t => t.id === sub.taskId);
+                      const isEditing = editingSub === sub.id;
+
+                      return (
+                        <div key={sub.id} className="p-4 transition-colors hover:bg-gray-50/50">
+                          <div className="flex justify-between items-start mb-3">
+                            <div>
+                              <div className="font-bold text-sm text-gray-900">{task?.title || "Unknown Task"}</div>
+                              <div className="text-xs text-gray-500 font-medium mt-0.5">
+                                {format(parseISO(sub.submittedAt), "MMM d, yyyy h:mm a")}
+                              </div>
+                            </div>
+                            <a 
+                              href={sub.link} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors"
+                            >
+                              View Link <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+
+                          {isEditing ? (
+                            <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-3 flex items-end gap-3 flex-wrap">
+                              <div className="flex-1 w-full min-w-[100px]">
+                                <label className="block text-xs font-bold text-gray-600 uppercase mb-1 ml-1">Likes</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={likesInput}
+                                  onChange={e => setLikesInput(parseInt(e.target.value) || 0)}
+                                  className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                />
+                              </div>
+                              <div className="flex-1 w-full min-w-[100px]">
+                                <label className="block text-xs font-bold text-gray-600 uppercase mb-1 ml-1">Comments</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={commentsInput}
+                                  onChange={e => setCommentsInput(parseInt(e.target.value) || 0)}
+                                  className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                />
+                              </div>
+                              <div className="flex gap-2 w-full justify-end mt-2">
+                                <button
+                                  onClick={() => handleSave(sub.id)}
+                                  className="bg-blue-600 text-white px-3 py-1.5 rounded-xl hover:bg-blue-700 flex justify-center items-center flex-shrink-0 shadow-sm text-xs font-bold flex-1 max-w-[80px]"
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div 
+                              className="flex items-center justify-between bg-gray-50 rounded-2xl p-3 border border-gray-100 cursor-pointer hover:border-gray-300 transition-colors group"
+                              onClick={() => handleEditClick(sub)}
+                            >
+                              <div className="flex gap-4">
+                                <div>
+                                  <div className="text-[10px] font-bold text-gray-400 leading-none mb-1 uppercase tracking-wider">LIKES</div>
+                                  <div className="text-sm font-bold text-gray-900 leading-none">{sub.likes}</div>
+                                </div>
+                                <div className="w-px h-6 bg-gray-200" />
+                                <div>
+                                  <div className="text-[10px] font-bold text-gray-400 leading-none mb-1 uppercase tracking-wider">COMMENTS</div>
+                                  <div className="text-sm font-bold text-gray-900 leading-none">{sub.comments}</div>
+                                </div>
+                              </div>
+                              <div className="text-blue-600 text-xs font-bold opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                                Edit <ChevronDown className="w-3 h-3 -rotate-90" />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  {(submissionsByUser[selectedUserId] || []).length === 0 && (
+                    <div className="p-6 text-center text-gray-500 text-sm font-medium">
+                      This user hasn't submitted any links yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="space-y-4">
           <div className="bg-white rounded-[32px] p-6 shadow-sm border border-gray-100">
