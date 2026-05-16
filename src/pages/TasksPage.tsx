@@ -47,13 +47,19 @@ export const TasksPage = () => {
   });
 
   // Get unique sorted dates
-  const dates = Object.keys(groupedTasks).filter(d => {
+  let dateKeys = Object.keys(groupedTasks);
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  if (!dateKeys.includes(todayStr)) {
+    dateKeys.push(todayStr);
+  }
+
+  const dates = dateKeys.filter(d => {
     try {
       const parsed = parseISO(d);
       return !isNaN(parsed.getTime());
     } catch(e) { return false; }
   }).sort((a, b) => 
-    new Date(a).getTime() - new Date(b).getTime()
+    new Date(a).getTime() - new Date(b).getTime() // sort ascending (oldest first)
   );
 
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
@@ -302,7 +308,12 @@ export const TasksPage = () => {
                 </div>
 
                 <div className="space-y-3">
-                  {groupedTasks[dateString].map(renderTaskCard)}
+                  {(groupedTasks[dateString] || []).map(renderTaskCard)}
+                  {(!groupedTasks[dateString] || groupedTasks[dateString].length === 0) && (
+                    <div className="text-center py-6 bg-white rounded-2xl border border-gray-100 shadow-sm">
+                      <p className="text-gray-500 text-sm font-medium">No tasks scheduled for this day</p>
+                    </div>
+                  )}
                 </div>
               </div>
             );
