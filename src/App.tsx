@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './store/AppContext';
 import { Navigation } from './components/Navigation';
 import { TasksPage } from './pages/TasksPage';

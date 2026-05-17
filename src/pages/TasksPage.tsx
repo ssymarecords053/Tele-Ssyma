@@ -59,8 +59,20 @@ export const TasksPage = () => {
       return !isNaN(parsed.getTime());
     } catch(e) { return false; }
   }).sort((a, b) => 
-    new Date(a).getTime() - new Date(b).getTime() // sort ascending (oldest first)
+    new Date(a).getTime() - new Date(b).getTime() // sort ascending (chronological)
   );
+
+  React.useEffect(() => {
+    if (viewMode === "list") {
+      const todayElement = document.getElementById(`date-${todayStr}`);
+      if (todayElement) {
+        // Use a small timeout to ensure rendering is complete
+        setTimeout(() => {
+          todayElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+      }
+    }
+  }, [viewMode, groupedTasks]);
 
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
   const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
@@ -294,7 +306,7 @@ export const TasksPage = () => {
             const isToday = isSameDay(date, new Date());
             
             return (
-              <div key={dateString} className="space-y-4">
+              <div key={dateString} id={`date-${dateString}`} className="space-y-4">
                 <div className="flex items-center gap-2 sticky top-0 bg-gray-50/90 backdrop-blur-md py-2 z-10 -mx-4 px-4">
                   <div className="w-1 h-5 bg-blue-500 rounded-full" />
                   <h2 className="text-lg font-bold text-gray-800">
